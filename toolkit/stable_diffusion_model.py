@@ -553,7 +553,7 @@ class StableDiffusion:
                 
                 for idx, lora_path in enumerate(self.model_config.lora_path):
                     lora_weight = self.model_config.lora_weights[idx] if idx < len(self.model_config.lora_weights) else 1.0
-                    
+                    print(f"Loading Lora {idx}")
                     if self.low_vram:
                         # we cannot fuse the loras all at once without ooming in lowvram mode, so we have to do it in parts
                         # we can do it on the cpu but it takes about 5-10 mins vs seconds on the gpu

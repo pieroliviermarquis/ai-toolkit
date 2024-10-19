@@ -538,7 +538,7 @@ class StableDiffusion:
                     # trigger it to get merged in
                     self.model_config.lora_path = self.model_config.assistant_lora_path
 
-            if self.model_config.lora_paths is not None and len(self.model_config.lora_paths) > 0:
+            if self.model_config.lora_path is not None and len(self.model_config.lora_path) > 0:
                 print("Fusing in LoRAs")
                 # need the pipe for peft
                 pipe: FluxPipeline = FluxPipeline(
@@ -551,7 +551,7 @@ class StableDiffusion:
                     transformer=transformer,
                 )
                 
-                for idx, lora_path in enumerate(self.model_config.lora_paths):
+                for idx, lora_path in enumerate(self.model_config.lora_path):
                     lora_weight = self.model_config.lora_weights[idx] if idx < len(self.model_config.lora_weights) else 1.0
                     
                     if self.low_vram:
@@ -759,11 +759,19 @@ class StableDiffusion:
         self.unet.eval()
 
         # load any loras we have
-        if self.model_config.lora_path is not None and not self.is_flux:
+        if hasattr(self.model_config, 'lora_path') and self.model_config.lora_path and not self.is_flux:
+            for idx, lora_path in enumerate(self.model_config.lora_path):
+                lora_weight = self.model_config.lora_weights[idx] if hasattr(self.model_config, 'lora_weights') and idx < len(self.model_config.lora_weights) else 1.0
+                pipe.load_lora_weights(lora_path, adapter_name=f"lora{idx}")
+                pipe.fuse_lora(lora_scale=lora_weight)
+                pipe.unload_lora_weights()
+                print(f"Loaded and fused LoRA from {lora_path} with weight {lora_weight}")
+        elif self.model_config.lora_path is not None and not self.is_flux:
+            # Backward compatibility for single lora_path
             pipe.load_lora_weights(self.model_config.lora_path, adapter_name="lora1")
             pipe.fuse_lora()
-            # unfortunately, not an easier way with peft
             pipe.unload_lora_weights()
+            print(f"Loaded and fused LoRA from {self.model_config.lora_path}")
 
         self.tokenizer = tokenizer
         self.text_encoder = text_encoder

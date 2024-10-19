@@ -538,8 +538,8 @@ class StableDiffusion:
                     # trigger it to get merged in
                     self.model_config.lora_path = self.model_config.assistant_lora_path
 
-            if self.model_config.lora_path is not None:
-                print("Fusing in LoRA")
+            if self.model_config.lora_paths is not None and len(self.model_config.lora_paths) > 0:
+                print("Fusing in LoRAs")
                 # need the pipe for peft
                 pipe: FluxPipeline = FluxPipeline(
                     scheduler=None,
@@ -550,60 +550,64 @@ class StableDiffusion:
                     vae=None,
                     transformer=transformer,
                 )
-                if self.low_vram:
-                    # we cannot fuse the loras all at once without ooming in lowvram mode, so we have to do it in parts
-                    # we can do it on the cpu but it takes about 5-10 mins vs seconds on the gpu
-                    # we are going to separate it into the two transformer blocks one at a time
+                
+                for idx, lora_path in enumerate(self.model_config.lora_paths):
+                    lora_weight = self.model_config.lora_weights[idx] if idx < len(self.model_config.lora_weights) else 1.0
+                    
+                    if self.low_vram:
+                        # we cannot fuse the loras all at once without ooming in lowvram mode, so we have to do it in parts
+                        # we can do it on the cpu but it takes about 5-10 mins vs seconds on the gpu
+                        # we are going to separate it into the two transformer blocks one at a time
 
-                    lora_state_dict = load_file(self.model_config.lora_path)
-                    single_transformer_lora = {}
-                    single_block_key = "transformer.single_transformer_blocks."
-                    double_transformer_lora = {}
-                    double_block_key = "transformer.transformer_blocks."
-                    for key, value in lora_state_dict.items():
-                        if single_block_key in key:
-                            single_transformer_lora[key] = value
-                        elif double_block_key in key:
-                            double_transformer_lora[key] = value
-                        else:
-                            raise ValueError(f"Unknown lora key: {key}. Cannot load this lora in low vram mode")
+                        lora_state_dict = load_file(lora_path)
+                        single_transformer_lora = {}
+                        single_block_key = "transformer.single_transformer_blocks."
+                        double_transformer_lora = {}
+                        double_block_key = "transformer.transformer_blocks."
+                        for key, value in lora_state_dict.items():
+                            if single_block_key in key:
+                                single_transformer_lora[key] = value
+                            elif double_block_key in key:
+                                double_transformer_lora[key] = value
+                            else:
+                                raise ValueError(f"Unknown lora key: {key}. Cannot load this lora in low vram mode")
 
-                    # double blocks
-                    transformer.transformer_blocks = transformer.transformer_blocks.to(
-                        torch.device(self.quantize_device), dtype=dtype
-                    )
-                    pipe.load_lora_weights(double_transformer_lora, adapter_name=f"lora1_double")
-                    pipe.fuse_lora()
-                    pipe.unload_lora_weights()
-                    transformer.transformer_blocks = transformer.transformer_blocks.to(
-                        'cpu', dtype=dtype
-                    )
+                        # double blocks
+                        transformer.transformer_blocks = transformer.transformer_blocks.to(
+                            torch.device(self.quantize_device), dtype=dtype
+                        )
+                        pipe.load_lora_weights(double_transformer_lora, adapter_name=f"lora{idx}_double")
+                        pipe.fuse_lora(lora_scale=lora_weight)
+                        pipe.unload_lora_weights()
+                        transformer.transformer_blocks = transformer.transformer_blocks.to(
+                            'cpu', dtype=dtype
+                        )
 
-                    # single blocks
-                    transformer.single_transformer_blocks = transformer.single_transformer_blocks.to(
-                        torch.device(self.quantize_device), dtype=dtype
-                    )
-                    pipe.load_lora_weights(single_transformer_lora, adapter_name=f"lora1_single")
-                    pipe.fuse_lora()
-                    pipe.unload_lora_weights()
-                    transformer.single_transformer_blocks = transformer.single_transformer_blocks.to(
-                        'cpu', dtype=dtype
-                    )
+                        # single blocks
+                        transformer.single_transformer_blocks = transformer.single_transformer_blocks.to(
+                            torch.device(self.quantize_device), dtype=dtype
+                        )
+                        pipe.load_lora_weights(single_transformer_lora, adapter_name=f"lora{idx}_single")
+                        pipe.fuse_lora(lora_scale=lora_weight)
+                        pipe.unload_lora_weights()
+                        transformer.single_transformer_blocks = transformer.single_transformer_blocks.to(
+                            'cpu', dtype=dtype
+                        )
 
-                    # cleanup
-                    del single_transformer_lora
-                    del double_transformer_lora
-                    del lora_state_dict
-                    flush()
+                        # cleanup
+                        del single_transformer_lora
+                        del double_transformer_lora
+                        del lora_state_dict
+                        flush()
 
-                else:
-                    # need the pipe to do this unfortunately for now
-                    # we have to fuse in the weights before quantizing
-                    pipe.load_lora_weights(self.model_config.lora_path, adapter_name="lora1")
-                    pipe.fuse_lora()
-                    # unfortunately, not an easier way with peft
-                    pipe.unload_lora_weights()
-            flush()
+                    else:
+                        # need the pipe to do this unfortunately for now
+                        # we have to fuse in the weights before quantizing
+                        pipe.load_lora_weights(lora_path, adapter_name=f"lora{idx}")
+                        pipe.fuse_lora(lora_scale=lora_weight)
+                        # unfortunately, not an easier way with peft
+                        pipe.unload_lora_weights()
+                flush()
 
             if self.model_config.quantize:
                 quantization_type = qfloat8

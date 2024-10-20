@@ -1522,6 +1522,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
         optimizer_type = self.train_config.optimizer.lower()
         optimizer = get_optimizer(self.params, optimizer_type, learning_rate=self.train_config.lr,
                                   optimizer_params=self.train_config.optimizer_params)
+        print("Optimizer: LR: ", learning_rate=self.train_config.lr, "Other Params: ", self.train_config.optimizer_params)
         self.optimizer = optimizer
 
         # check if it exists

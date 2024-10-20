@@ -1732,6 +1732,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 # torch.cuda.empty_cache()
                 if self.train_config.optimizer.lower().startswith('dadaptation') or \
                         self.train_config.optimizer.lower().startswith('prodigy'):
+                    print("Train loop: ", "D: ", optimizer.param_groups[0]["d"], "Lr: ", optimizer.param_groups[0]["lr"])
                     learning_rate = (
                             optimizer.param_groups[0]["d"] *
                             optimizer.param_groups[0]["lr"]
